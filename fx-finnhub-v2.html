@@ -208,36 +208,10 @@ header{height:52px;display:flex;align-items:center;padding:0 20px;gap:10px;borde
 </div>
 
 <script>
-// ── イベント登録（onclick属性を使わない安全な方式）──
-document.addEventListener('DOMContentLoaded', () => {
-  // ペアタブ
-  const tabMap = {
-    'tab-USDJPY': 'USD/JPY',
-    'tab-EURUSD': 'EUR/USD',
-    'tab-AUDUSD': 'AUD/USD',
-    'tab-AUDJPY': 'AUD/JPY',
-    'tab-BTCUSD': 'BTC/USD',
-    'tab-ALL':    'ALL',
-  };
-  Object.entries(tabMap).forEach(([id, pair]) => {
-    const btn = document.getElementById(id);
-    if (btn) btn.addEventListener('click', () => setPair(pair, btn));
-  });
-
-  // 分析ボタン
-  const runBtn = document.getElementById('runBtn');
-  if (runBtn) runBtn.addEventListener('click', runAll);
-});
-
+// ── イベント登録 ──────────────────────────
+// scriptタグの末尾で登録することでHTMLが確実に読み込まれた後に実行
 // ── 定数 ──────────────────────────────────
 const PAIRS = ['USD/JPY','EUR/USD','AUD/USD','AUD/JPY','BTC/USD'];
-const FH_SYM = {
-  'USD/JPY':'OANDA:USD_JPY',
-  'EUR/USD':'OANDA:EUR_USD',
-  'AUD/USD':'OANDA:AUD_USD',
-  'AUD/JPY':'OANDA:AUD_JPY',
-};
-
 let currentPair = 'USD/JPY';
 
 function setPair(p, btn) {
@@ -502,6 +476,7 @@ function buildPrompt(pairStr, price, tD, t4h, t1h, lines, walls, notes, recentH1
   if (trendDir === 'sell' && (!lines.r1 || lines.r1.price <= price)) {
     ngLines.push(`⛔ 売りシナリオには現在値より上のR1が必要。現在値より下の水平線での売りは追いかけ売りであり禁止`);
   }
+  const ngSection = ngLines.length > 0 ? `
 ━━━ 【⚠️ 自動NG判定（必ず守ること）】 ━━━
 以下は計算により自動的にエントリー禁止と判定されました。これらは絶対に無視しないこと：
 ${ngLines.join('\n')}
@@ -984,8 +959,9 @@ function renderMiniResult(r) {
 let ANTHROPIC_KEY = '';
 
 function setUILocked(locked) {
-  document.getElementById('runBtn').disabled = locked;
-  document.querySelectorAll('.ptab').forEach(b => b.disabled = locked);
+  const btn = document.getElementById('runBtn');
+  if (btn) btn.disabled = locked;
+  // ペアタブは分析中も切り替え可能にする（disabledにしない）
 }
 
 async function runAll() {
@@ -1020,6 +996,22 @@ async function runAll() {
     setUILocked(false);
   }
 }
+
+// ── ボタンイベント登録（script末尾で確実に登録）──
+const _tabMap = {
+  'tab-USDJPY': 'USD/JPY',
+  'tab-EURUSD': 'EUR/USD',
+  'tab-AUDUSD': 'AUD/USD',
+  'tab-AUDJPY': 'AUD/JPY',
+  'tab-BTCUSD': 'BTC/USD',
+  'tab-ALL':    'ALL',
+};
+Object.entries(_tabMap).forEach(([id, pair]) => {
+  const btn = document.getElementById(id);
+  if (btn) btn.addEventListener('click', () => setPair(pair, btn));
+});
+const _runBtn = document.getElementById('runBtn');
+if (_runBtn) _runBtn.addEventListener('click', runAll);
 </script>
 </body>
 </html>
