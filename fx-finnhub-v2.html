@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:">
+<title>FX 自動戦略アナライザー v2（Twelve Data）</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+:root {
+  --bg:#07090d; --s1:#0e1218; --s2:#141a22; --border:#1e2530; --b2:#2a333f;
+  --long:#34c96a; --short:#f05353; --wait:#e0a020; --blue:#4d9de0; --purple:#a57de8;
+  --text:#dde5ef; --muted:#6b7889; --dim:#394250;
+  --mono:'IBM Plex Mono',monospace; --sans:'Noto Sans JP',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh;display:flex;flex-direction:column}
+
+/* HEADER */
+header{height:52px;display:flex;align-items:center;padding:0 20px;gap:10px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:100}
+.logo{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--blue);letter-spacing:.1em;white-space:nowrap}
+.pair-tabs{display:flex;gap:3px;flex-wrap:wrap}
+.ptab{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid var(--b2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
+.ptab.active{border-color:var(--blue);color:var(--blue);background:rgba(77,157,224,.1)}
+.api-zone{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.api-input{background:var(--s2);border:1px solid var(--b2);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:11px;padding:6px 10px;width:230px}
+.api-input:focus{outline:none;border-color:var(--blue)}
+.api-input::placeholder{color:var(--dim)}
+.run-btn{background:var(--blue);color:#07090d;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;transition:opacity .15s}
+.run-btn:hover{opacity:.85}
+.run-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* LAYOUT */
+.layout{display:grid;grid-template-columns:270px 1fr;flex:1;min-height:calc(100vh - 52px)}
+
+/* SIDEBAR */
+.sidebar{border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:14px;overflow-y:auto}
+.s-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;padding-bottom:5px;border-bottom:1px solid var(--border);margin-bottom:6px}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.stat-card{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:8px 10px}
+.st-l{font-family:var(--mono);font-size:9px;color:var(--dim);margin-bottom:2px}
+.st-v{font-family:var(--mono);font-size:12px;font-weight:600}
+.st-b{display:inline-block;font-size:9px;padding:2px 5px;border-radius:3px;margin-top:2px;font-family:var(--mono)}
+.b-up{background:rgba(52,201,106,.15);color:var(--long)}
+.b-down{background:rgba(240,83,83,.15);color:var(--short)}
+.b-range{background:rgba(224,160,32,.15);color:var(--wait)}
+.b-none{background:var(--border);color:var(--muted)}
+.c-long{color:var(--long)}.c-short{color:var(--short)}.c-wait{color:var(--wait)}.c-blue{color:var(--blue)}.c-purple{color:var(--purple)}
+
+.lines-list{display:flex;flex-direction:column;gap:3px}
+.line-row{display:flex;align-items:center;justify-content:space-between;padding:5px 9px;border-radius:5px;background:var(--s2);border:1px solid var(--border);font-family:var(--mono);font-size:11px}
+.line-row.res{border-left:2px solid var(--short)}
+.line-row.sup{border-left:2px solid var(--long)}
+.line-row.wall{border-left:2px solid var(--purple)}
+.line-row.cur{border-left:2px solid var(--blue);background:rgba(77,157,224,.05)}
+.l-tag{color:var(--muted);font-size:9px}
+.l-price{color:var(--text);font-weight:600}
+.l-dist{color:var(--dim);font-size:9px}
+
+/* pair score badges */
+.score-list{display:flex;flex-direction:column;gap:5px}
+.score-row{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:6px;background:var(--s2);border:1px solid var(--border)}
+.score-row.best{border-color:var(--long);background:rgba(52,201,106,.06)}
+.score-pair{font-family:var(--mono);font-size:11px;font-weight:600}
+.score-badge{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px}
+.sc-ready{background:rgba(52,201,106,.15);color:var(--long)}
+.sc-partial{background:rgba(224,160,32,.15);color:var(--wait)}
+.sc-wait{background:var(--border);color:var(--muted)}
+.sc-ng{background:rgba(240,83,83,.1);color:var(--short)}
+
+.notes-area{background:var(--s2);border:1px solid var(--b2);border-radius:6px;color:var(--text);font-family:var(--sans);font-size:12px;padding:8px 10px;width:100%;resize:vertical;min-height:56px;line-height:1.5}
+.notes-area:focus{outline:none;border-color:var(--blue)}
+.notes-area::placeholder{color:var(--dim)}
+
+/* MAIN */
+.main{padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--dim);gap:12px;text-align:center;min-height:300px}
+.empty-icon{font-size:36px;opacity:.35}
+.empty p{font-size:12px;line-height:1.9}
+
+/* loading */
+.load-card{background:var(--s1);border:1px solid var(--border);border-radius:9px;padding:20px;display:flex;flex-direction:column;gap:8px}
+.ld{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--dim)}
+.ld.done{color:var(--long)}.ld.active{color:var(--blue)}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--b2);border-top-color:var(--blue);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* result */
+.result-card{background:var(--s1);border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-bottom:4px}
+.res-head{padding:12px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);background:var(--s2)}
+.pill{font-family:var(--mono);font-size:10px;font-weight:600;padding:3px 9px;border-radius:20px;letter-spacing:.06em}
+.pill-long{background:rgba(52,201,106,.15);color:var(--long)}
+.pill-short{background:rgba(240,83,83,.15);color:var(--short)}
+.pill-wait{background:rgba(224,160,32,.15);color:var(--wait)}
+.pill-ng{background:rgba(240,83,83,.12);color:var(--short)}
+.res-pair{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.res-time{font-size:10px;color:var(--dim);margin-left:auto;font-family:var(--mono)}
+
+.data-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border)}
+.dc{background:var(--s1);padding:8px 12px}
+.dc-l{font-size:9px;color:var(--dim);margin-bottom:2px;font-family:var(--mono)}
+.dc-v{font-size:13px;font-weight:700;font-family:var(--mono)}
+
+.ai-body{padding:16px 20px;font-size:13px;line-height:1.85;white-space:pre-wrap}
+.ai-body .sec{display:block;font-weight:700;color:var(--blue);margin-top:14px;margin-bottom:3px;font-size:12px}
+.ai-body .sec:first-child{margin-top:0}
+
+.ng-bar{background:rgba(240,83,83,.08);border:1px solid rgba(240,83,83,.25);border-radius:6px;padding:9px 13px;font-size:12px;color:var(--short);line-height:1.6;margin:0 18px 12px}
+
+/* SL/TP panel */
+.sltp-panel {
+  margin: 0 18px 14px;
+  background: var(--s2);
+  border: 1px solid var(--b2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sltp-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: .06em;
+  background: var(--s1);
+}
+.sltp-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+}
+.sltp-row:last-child { border-bottom: none; }
+.sltp-icon  { font-size: 13px; text-align: center; }
+.sltp-label { font-size: 11px; color: var(--muted); }
+.sltp-val   { font-size: 14px; font-weight: 600; text-align: right; }
+.sltp-rr    { font-size: 10px; color: var(--dim); background: var(--border); padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+.sltp-rr.rr-great { background: rgba(52,201,106,.2);  color: var(--long); }
+.sltp-rr.rr-ok    { background: rgba(77,157,224,.2);  color: var(--blue); }
+.sltp-rr.rr-ng    { background: rgba(240,83,83,.2);   color: var(--short); }
+.sltp-panel.sltp-ng { border-color: rgba(240,83,83,.4); }
+.sltp-skip  { background: rgba(240,83,83,.1); color: var(--short); font-size: 11px; padding: 7px 14px; border-bottom: 1px solid var(--border); line-height: 1.5; }
+
+
+
+@media(max-width:720px){
+  .layout{grid-template-columns:1fr}
+  .sidebar{border-right:none;border-bottom:1px solid var(--border)}
+  .api-input{width:150px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">FX // AUTO ANALYZER v2</div>
+  <div class="pair-tabs">
+    <button class="ptab active" id="tab-USDJPY">USD/JPY</button>
+    <button class="ptab" id="tab-EURUSD">EUR/USD</button>
+    <button class="ptab" id="tab-AUDUSD">AUD/USD</button>
+    <button class="ptab" id="tab-AUDJPY">AUD/JPY</button>
+    <button class="ptab" id="tab-BTCUSD">BTC/USD</button>
+    <button class="ptab" id="tab-ALL">🔍 全ペア比較</button>
+  </div>
+  <div class="api-zone">
+    <input class="api-input" id="apiKey" type="password" placeholder="Twelve Data APIキー">
+    <input class="api-input" id="anthropicKey" type="password" placeholder="Anthropic APIキー (sk-ant-...)">
+    <button class="run-btn" id="runBtn">▶ 分析開始</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div>
+      <div class="s-label">トレンド状況</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="st-l">日足</div><div class="st-v" id="v-d">--</div><span class="st-b b-none" id="b-d">待機</span></div>
+        <div class="stat-card"><div class="st-l">4時間足</div><div class="st-v" id="v-4h">--</div><span class="st-b b-none" id="b-4h">待機</span></div>
+        <div class="stat-card"><div class="st-l">1時間足</div><div class="st-v" id="v-1h">--</div><span class="st-b b-none" id="b-1h">待機</span></div>
+        <div class="stat-card"><div class="st-l">現在値</div><div class="st-v c-blue" id="v-price">--</div><span class="st-b b-none" id="b-price">--</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="s-label">自動検出 水平線</div>
+      <div class="lines-list" id="linesList"><div style="color:var(--dim);font-size:11px;text-align:center;padding:12px">分析後に表示</div></div>
+    </div>
+    <div id="scoreSection" style="display:none">
+      <div class="s-label">全ペア エントリー適性</div>
+      <div class="score-list" id="scoreList"></div>
+    </div>
+    <div>
+      <div class="s-label">補足メモ（任意）</div>
+      <textarea class="notes-area" id="notes" placeholder="重要指標・窓開け・特記事項など"></textarea>
+    </div>
+  </aside>
+
+  <main class="main" id="mainPanel">
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">📡</div>
+      <p>Twelve Data APIキーを入力して「▶ 分析開始」を押してください<br><br>
+      単体ペア：そのペアのエントリーポイントを詳細出力<br>
+      🔍 全ペア比較：4ペアを同時分析し<br>最も条件が揃ったペアを優先提示します</p>
+    </div>
+  </main>
+</div>
+
+<script>
+// ── イベント登録（onclick属性を使わない安全な方式）──
+document.addEventListener('DOMContentLoaded', () => {
+  // ペアタブ
+  const tabMap = {
+    'tab-USDJPY': 'USD/JPY',
+    'tab-EURUSD': 'EUR/USD',
+    'tab-AUDUSD': 'AUD/USD',
+    'tab-AUDJPY': 'AUD/JPY',
+    'tab-BTCUSD': 'BTC/USD',
+    'tab-ALL':    'ALL',
+  };
+  Object.entries(tabMap).forEach(([id, pair]) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener('click', () => setPair(pair, btn));
+  });
+
+  // 分析ボタン
+  const runBtn = document.getElementById('runBtn');
+  if (runBtn) runBtn.addEventListener('click', runAll);
+});
+
+// ── 定数 ──────────────────────────────────
+const PAIRS = ['USD/JPY','EUR/USD','AUD/USD','AUD/JPY','BTC/USD'];
+const FH_SYM = {
+  'USD/JPY':'OANDA:USD_JPY',
+  'EUR/USD':'OANDA:EUR_USD',
+  'AUD/USD':'OANDA:AUD_USD',
+  'AUD/JPY':'OANDA:AUD_JPY',
+};
+
+let currentPair = 'USD/JPY';
+
+function setPair(p, btn) {
+  currentPair = p;
+  document.querySelectorAll('.ptab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── ユーティリティ ─────────────────────────
+const isJpy = p => p.includes('JPY');
+const isBtc = p => p.includes('BTC');
+const pip   = p => isBtc(p) ? 1 : isJpy(p) ? 0.01 : 0.0001;
+const fmt   = (v, p) => isBtc(p) ? Number(v).toFixed(1) : isJpy(p) ? Number(v).toFixed(3) : Number(v).toFixed(5);
+const pips  = (a, b, p) => Math.round(Math.abs(a - b) / pip(p));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const tLabel = { up:'↑ 上昇', down:'↓ 下降', range:'→ レンジ' };
+const tClass = { up:'b-up', down:'b-down', range:'b-range' };
+const tValClass = { up:'c-long', down:'c-short', range:'c-wait' };
+
+// ── Twelve Data ───────────────────────────
+// BTC/USDも含めTwelve Dataのシンボルをそのまま使用
+const TD_INTERVAL = {
+  'D':   '1day',
+  '240': '4h',
+  '60':  '1h',
+};
+
+async function fetchCandles(apiKey, pairStr, resolution, outputsize) {
+  const interval = TD_INTERVAL[resolution];
+  const symbol = pairStr; // USD/JPY, BTC/USD などそのまま
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&apikey=${apiKey}&format=JSON`;
+  const r = await fetch(url);
+  const d = await r.json();
+  if (d.status === 'error') throw new Error(`Twelve Data APIエラー: ${d.message}`);
+  if (!d.values || d.values.length === 0) throw new Error(`データなし（${pairStr} ${interval}）。市場が閉まっている可能性があります。`);
+  return d.values.map(c => ({
+    time:  new Date(c.datetime).getTime() / 1000,
+    open:  parseFloat(c.open),
+    high:  parseFloat(c.high),
+    low:   parseFloat(c.low),
+    close: parseFloat(c.close),
+    datetime: c.datetime,
+  }));
+}
+
+// ── ダウ理論 ──────────────────────────────
+function detectTrend(candles) {
+  if (candles.length < 10) return 'range';
+  const c = [...candles].reverse();
+  const recent = c.slice(-20);
+  const highs = recent.map(x => x.high);
+  const lows  = recent.map(x => x.low);
+  const h1 = Math.max(...highs.slice(0, 10)), h2 = Math.max(...highs.slice(10));
+  const l1 = Math.min(...lows.slice(0,  10)), l2 = Math.min(...lows.slice(10));
+  if (h2 > h1 && l2 > l1) return 'up';
+  if (h2 < h1 && l2 < l1) return 'down';
+  return 'range';
+}
+
+// ── 水平線検出 ────────────────────────────
+function findLines(candles1h, price, pairStr) {
+  // BTCは価格の0.5%をクラスター幅に（FXはpips×15）
+  const cluster = isBtc(pairStr) ? price * 0.005 : pip(pairStr) * 15;
+  const minDist  = isBtc(pairStr) ? price * 0.003 : pip(pairStr) * 5;
+
+  const pts = [];
+  for (let i = 1; i < candles1h.length - 1; i++) {
+    const h = candles1h[i].high, l = candles1h[i].low;
+    if (h >= candles1h[i-1].high && h >= candles1h[i+1].high) pts.push({ price: h, type: 'res' });
+    if (l <= candles1h[i-1].low  && l <= candles1h[i+1].low)  pts.push({ price: l, type: 'sup' });
+  }
+  pts.sort((a, b) => a.price - b.price);
+  const merged = [];
+  for (const p of pts) {
+    const ex = merged.find(m => Math.abs(m.price - p.price) < cluster);
+    if (ex) { ex.count++; ex.price = (ex.price * (ex.count - 1) + p.price) / ex.count; }
+    else merged.push({ ...p, count: 1 });
+  }
+  const above = merged.filter(m => m.price > price + minDist).sort((a, b) => a.price - b.price);
+  const below = merged.filter(m => m.price < price - minDist).sort((a, b) => b.price - a.price);
+  return { r1: above[0]||null, r2: above[1]||null, s1: below[0]||null, s2: below[1]||null };
+}
+
+// ── 日足の壁 ──────────────────────────────
+function findWalls(candlesD, price, pairStr) {
+  const c = candlesD.slice(0, 20);
+  const rh = Math.max(...c.map(x => x.high));
+  const rl = Math.min(...c.map(x => x.low));
+  const walls = [];
+
+  if (isBtc(pairStr)) {
+    // BTCはドル距離で判定（価格の15%以内）
+    const distH = Math.abs(rh - price);
+    const distL = Math.abs(rl - price);
+    const threshold = price * 0.15;
+    if (distH < threshold) walls.push({ price: rh, label: '日足レンジ上限', dist: Math.round(distH), unit: '$' });
+    if (distL < threshold) walls.push({ price: rl, label: '日足レンジ下限', dist: Math.round(distL), unit: '$' });
+  } else {
+    const dH = pips(rh, price, pairStr), dL = pips(rl, price, pairStr);
+    if (dH < 200) walls.push({ price: rh, label: '日足レンジ上限', dist: dH, unit: 'pips' });
+    if (dL < 200) walls.push({ price: rl, label: '日足レンジ下限', dist: dL, unit: 'pips' });
+  }
+  return walls;
+}
+
+// ── エントリー適性スコア ──────────────────
+function calcScore(tD, t4h, t1h, price, lines, walls, pairStr) {
+  let score = 0;
+  const msgs = [];
+
+  // 壁までの距離（BTC：ドル、FX：pips）
+  const wallDist = w => isBtc(pairStr) ? w.dist : w.dist;
+  const wallNG   = isBtc(pairStr) ? 500 : 20;   // BTCは$500以内がNG
+  const wallOK   = isBtc(pairStr) ? 2000 : 60;  // BTCは$2000以上で余白十分
+  const wallMid  = isBtc(pairStr) ? 1000 : 30;
+
+  const closestWall = walls.length ? Math.min(...walls.map(w => wallDist(w))) : 99999;
+
+  if (closestWall <= wallNG) {
+    return { score: -1, label: '壁NG', msgs: [`壁まで${closestWall}${isBtc(pairStr)?'$':'pips'} — エントリー禁止`] };
+  }
+
+  if (tD !== 'range' && tD === t4h) { score += 3; msgs.push('✓ 日足・4H方向一致'); }
+  else if (tD === 'range' || t4h === 'range') { msgs.push('△ レンジあり'); }
+  else { score -= 1; msgs.push('✗ 日足・4H方向不一致'); }
+
+  if (closestWall > wallOK) { score += 2; msgs.push('✓ 壁まで余白十分'); }
+  else if (closestWall > wallMid) { score += 1; msgs.push('△ 壁まで余白あり'); }
+  else { msgs.push('△ 壁まで余白少なめ'); }
+
+  // 水平線の近さ（BTC：ドル距離、FX：pips）
+  const lineDist = (linePrice) => isBtc(pairStr) ? Math.abs(linePrice - price) : pips(linePrice, price, pairStr);
+  const lineNear = isBtc(pairStr) ? 500 : 20;
+  const lineMid  = isBtc(pairStr) ? 1500 : 40;
+
+  const nearR1 = lines.r1 ? lineDist(lines.r1.price) : 99999;
+  const nearS1 = lines.s1 ? lineDist(lines.s1.price) : 99999;
+  const nearestLine = Math.min(nearR1, nearS1);
+
+  if (nearestLine <= lineNear) { score += 2; msgs.push('✓ 水平線到達が近い'); }
+  else if (nearestLine <= lineMid) { score += 1; msgs.push('△ 水平線まで中距離'); }
+  else { msgs.push('✗ 水平線まで遠い'); }
+
+  const label = score >= 5 ? 'エントリー圏' : score >= 3 ? '条件一部OK' : score >= 1 ? '様子見' : '見送り推奨';
+  return { score, label, msgs };
+}
+
+// ── Sidebar更新 ───────────────────────────
+function updateSidebar(tD, t4h, t1h, price, lines, walls, pairStr) {
+  const set = (vi, bi, t) => {
+    const el = document.getElementById(vi);
+    el.textContent = tLabel[t];
+    el.className = 'st-v ' + tValClass[t];
+    const b = document.getElementById(bi);
+    b.className = 'st-b ' + tClass[t];
+    b.textContent = tLabel[t];
+  };
+  set('v-d',  'b-d',  tD);
+  set('v-4h', 'b-4h', t4h);
+  set('v-1h', 'b-1h', t1h);
+  document.getElementById('v-price').textContent = fmt(price, pairStr);
+  document.getElementById('b-price').textContent = pairStr;
+
+  const list = document.getElementById('linesList');
+  list.innerHTML = '';
+  const ngThreshSide = isBtc(pairStr) ? 500 : 20;
+  const isNearWall = (linePrice) => walls.some(w => {
+    const d = isBtc(pairStr) ? Math.abs(linePrice - w.price) : pips(linePrice, w.price, pairStr);
+    return d <= ngThreshSide;
+  });
+
+  const row = (cls, tag, p, dist) => {
+    const d = document.createElement('div');
+    const near = isNearWall(p);
+    d.className = 'line-row ' + cls;
+    d.style.opacity = near ? '0.5' : '1';
+    const ngMark = near ? ' <span style="color:var(--short);font-size:9px">⛔NG</span>' : '';
+    d.innerHTML = `<span class="l-tag">${tag}${ngMark}</span><span class="l-price">${fmt(p, pairStr)}</span><span class="l-dist">${dist}</span>`;
+    list.appendChild(d);
+  };
+  const distLabel = (linePrice) => isBtc(pairStr)
+    ? '$' + Math.round(Math.abs(linePrice - price))
+    : pips(linePrice, price, pairStr) + 'pips';
+
+  walls.forEach(w => {
+    const d = isBtc(pairStr) ? '$' + w.dist : w.dist + 'pips';
+    row('wall', '🟣 ' + w.label, w.price, d);
+  });
+  if (lines.r2) row('res', 'R2', lines.r2.price, distLabel(lines.r2.price));
+  if (lines.r1) row('res', 'R1', lines.r1.price, distLabel(lines.r1.price));
+  const cur = document.createElement('div');
+  cur.className = 'line-row cur';
+  cur.innerHTML = `<span class="l-tag">▶ 現在値</span><span class="l-price">${fmt(price, pairStr)}</span><span class="l-dist">--</span>`;
+  list.appendChild(cur);
+  if (lines.s1) row('sup', 'S1', lines.s1.price, distLabel(lines.s1.price));
+  if (lines.s2) row('sup', 'S2', lines.s2.price, distLabel(lines.s2.price));
+}
+
+// ── Loading ───────────────────────────────
+function showLoading(steps) {
+  const panel = document.getElementById('mainPanel');
+  document.getElementById('emptyState')?.remove();
+  let lc = document.getElementById('ldCard');
+  if (lc) lc.remove();
+  lc = document.createElement('div');
+  lc.className = 'load-card'; lc.id = 'ldCard';
+  lc.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">データ取得中...</div>`
+    + steps.map((s,i) => `<div class="ld" id="ld${i}"><span id="li${i}" style="color:var(--dim)">○</span>${s}</div>`).join('');
+  panel.insertBefore(lc, panel.firstChild);
+}
+const stepDone   = i => { const e=document.getElementById('ld'+i); if(e){e.className='ld done'; document.getElementById('li'+i).textContent='✓';} };
+const stepActive = i => { const e=document.getElementById('ld'+i); if(e){e.className='ld active'; document.getElementById('li'+i).innerHTML='<span class="spin"></span>';} };
+
+// ── プロンプト生成（順張り専用） ──────────
+function buildPrompt(pairStr, price, tD, t4h, t1h, lines, walls, notes, recentH1) {
+
+  // ── 壁と水平線の近接チェック（自動NG判定） ──
+  const ngThresh = isBtc(pairStr) ? 500 : 20; // BTC:$500 / FX:20pips
+  const wallPrices = walls.map(w => w.price);
+
+  const lineNearWall = (linePrice) => {
+    if (!linePrice) return null;
+    for (const wp of wallPrices) {
+      const d = isBtc(pairStr)
+        ? Math.abs(linePrice - wp)
+        : pips(linePrice, wp, pairStr);
+      if (d <= ngThresh) return { wallPrice: wp, dist: d };
+    }
+    return null;
+  };
+
+  const s1WallCheck = lines.s1 ? lineNearWall(lines.s1.price) : null;
+  const s2WallCheck = lines.s2 ? lineNearWall(lines.s2.price) : null;
+  const r1WallCheck = lines.r1 ? lineNearWall(lines.r1.price) : null;
+  const r2WallCheck = lines.r2 ? lineNearWall(lines.r2.price) : null;
+  const unit = isBtc(pairStr) ? '$' : 'pips';
+
+  const ngLines = [];
+  if (s1WallCheck) ngLines.push(`⛔ S1（${fmt(lines.s1.price, pairStr)}）は日足の壁（${fmt(s1WallCheck.wallPrice, pairStr)}）から${unit}${Math.round(s1WallCheck.dist)}以内 → S1での買いエントリーは禁止`);
+  if (s2WallCheck) ngLines.push(`⛔ S2（${fmt(lines.s2.price, pairStr)}）は日足の壁（${fmt(s2WallCheck.wallPrice, pairStr)}）から${unit}${Math.round(s2WallCheck.dist)}以内 → S2での買いエントリーは禁止`);
+  if (r1WallCheck) ngLines.push(`⛔ R1（${fmt(lines.r1.price, pairStr)}）は日足の壁（${fmt(r1WallCheck.wallPrice, pairStr)}）から${unit}${Math.round(r1WallCheck.dist)}以内 → R1での売りエントリーは禁止`);
+  if (r2WallCheck) ngLines.push(`⛔ R2（${fmt(lines.r2.price, pairStr)}）は日足の壁（${fmt(r2WallCheck.wallPrice, pairStr)}）から${unit}${Math.round(r2WallCheck.dist)}以内 → R2での売りエントリーは禁止`);
+
+  // 現在値と壁の近接チェック
+  const priceNearWall = wallPrices.some(wp => {
+    const d = isBtc(pairStr) ? Math.abs(price - wp) : pips(price, wp, pairStr);
+    return d <= ngThresh;
+  });
+  if (priceNearWall) ngLines.push(`⛔ 現在値（${fmt(price, pairStr)}）が日足の壁から${unit}${ngThresh}以内 → 現在地付近はエントリー禁止`);
+
+  const ngSection = ngLines.length > 0 ? `
+━━━ 【⚠️ 自動NG判定（必ず守ること）】 ━━━
+以下は計算により自動的にエントリー禁止と判定されました。これらは絶対に無視しないこと：
+${ngLines.join('\n')}
+これらのラインでのエントリーシナリオは「エントリー禁止」として扱い、代替シナリオを探すこと。
+
+` : '';
+
+  const wallText = walls.length
+    ? walls.map(w => `${w.label} ${fmt(w.price, pairStr)}（現在値から${isBtc(pairStr)?'$'+w.dist:w.dist+'pips'}）`).join('、')
+    : 'なし（遠い）';
+
+  const btcNote = isBtc(pairStr) ? `
+━━━ 【BTC/USD 特別注意事項】 ━━━
+・24時間365日取引可能（土日祝も動く）
+・価格単位はドル。水平線は$100〜$500単位の節目を重視すること
+・SLはFXより広め（$100〜$300程度）を基本とする
+・急騰・急落が頻繁なため、大陽線・大陰線の暴走中は特に注意
+・ピップ単位ではなくドル単位で記載すること
+
+` : '';
+
+  return `あなたは熟練FXトレーダーのコーチです。以下のトレードルールと市場データに基づき、今日の${pairStr}の戦略レポートを作成してください。
+${btcNote}${ngSection}
+━━━ 【適用するトレードルール】 ━━━
+
+【基本方針：純粋な順張りのみ】
+・日足・4時間足が上昇トレンド（高値・安値が共に切り上げ）→ 買いのみ
+・日足・4時間足が下降トレンド（高値・安値が共に切り下げ）→ 売りのみ
+・レンジ相場 → 中央は不介入。端（R1/S1付近）の順張りのみ検討
+・逆張りは一切しない。日足の壁での反発狙いも禁止
+
+【水平線ルール（4本厳守）】
+・上2本（R1,R2）・下2本（S1,S2）の間の「空中戦ゾーン」は絶対エントリー禁止
+・線の5〜10pips手前でアラートを設定して到達を待つ
+
+【買いエントリー条件（押し目買い）】
+  前提①：4時間足が上昇トレンド
+  前提②：エントリー方向（上）に日足の大物の壁まで30pips以上の余白がある
+  ① 1時間足でS1（サポート1）まで下落後、実体がラインを割らずに下ヒゲ or 横ばいで止まる
+  ② 5分足でダブルボトム or 安値切り上げが確定 → ネックライン上抜けでエントリー
+  損切り：5分足ダブルボトムの最安値の少し下（S1の数pips下）
+
+【売りエントリー条件（戻り売り）】
+  前提①：4時間足が下降トレンド
+  前提②：エントリー方向（下）に日足の大物の壁まで30pips以上の余白がある
+  ① 1時間足でR1（レジスタンス1）まで上昇後、実体がラインを超えずに上ヒゲ or 陰線増加で止まる
+  ② 5分足でダブルトップ or 高値切り下げが確定 → ネックライン下抜けでエントリー
+  損切り：5分足ダブルトップの最高値の少し上（R1の数pips上）
+
+【日足の大物の壁への対応（順張りのみ）】
+  壁まで10〜20pips以内 → エントリー絶対禁止。待機のみ
+  壁をブレイクした場合のみ：1時間足実体が明確に抜けた後、サポレジ転換（元の壁が支持/抵抗に変わる動き）を5分足で確認してからエントリー
+  ※壁での逆張りは一切しない
+
+【絶対NGルール】
+  ×空中戦ゾーン（R1〜S1の中間）でのエントリー
+  ×大陽線・大陰線の暴走中の飛び乗り（イナゴ）
+  ×日足の壁まで10〜20pips以内でのエントリー
+  ×1日3回を超えるエントリー
+  ×逆張り（いかなる場面でも）
+
+━━━ 【市場データ（自動取得済み）】 ━━━
+通貨ペア：${pairStr}
+現在値：${fmt(price, pairStr)}
+日足トレンド：${tLabel[tD]}（${tD==='up'?'高値・安値切り上げ':tD==='down'?'高値・安値切り下げ':'切り上げ・切り下げなし'}）
+4時間足トレンド：${tLabel[t4h]}
+1時間足トレンド：${tLabel[t1h]}
+
+■ 自動検出 水平線
+R2（上の2本目）：${lines.r2 ? fmt(lines.r2.price, pairStr)+'（+'+pips(lines.r2.price,price,pairStr)+'pips）' : '未検出'}
+R1（上の1本目）：${lines.r1 ? fmt(lines.r1.price, pairStr)+'（+'+pips(lines.r1.price,price,pairStr)+'pips）' : '未検出'}
+現在値：${fmt(price, pairStr)}
+S1（下の1本目）：${lines.s1 ? fmt(lines.s1.price, pairStr)+'（-'+pips(lines.s1.price,price,pairStr)+'pips）' : '未検出'}
+S2（下の2本目）：${lines.s2 ? fmt(lines.s2.price, pairStr)+'（-'+pips(lines.s2.price,price,pairStr)+'pips）' : '未検出'}
+
+■ 日足の大物の壁
+${wallText}
+
+■ 直近1時間足ローソク足（新→旧）
+${recentH1}
+
+■ 補足メモ：${notes||'なし'}
+
+━━━ 【損切り・利確ルール（厳守）】 ━━━
+
+【SL（損切り）】
+・基本は5分足パターン（ダブルボトム最安値/ダブルトップ最高値）の少し外側
+・その幅が40pips未満の場合は40pipsまで広げる
+・40pips以上が取れない局面はエントリー見送り
+
+【TP①（半決済）】
+・利幅の目標：30〜50pipsの範囲内に収まる水平線
+・RR最低基準：1:1.5以上（SL40pipsなら最低60pips先が必要）
+・30pips未満の水平線しかない場合 → TP①として使わず見送り
+・50pipsを超える水平線しかない場合 → 途中に仮の利確ライン（キリ番など）を設定
+
+【TP②（残り決済）】
+・TP①の次の水平線（R2またはS2）を目安
+・TP②がTP①から30pips以上離れていない場合は設定不要（TP①のみで全決済）
+・明らかに届きそうにない遠い水平線は設定しない
+
+【RR判定と見送り条件】
+・TP①のRRが1:1.5未満 → 「⚠️ RR不足：エントリー見送り推奨」と明示すること
+・TP①の利幅が30pips未満 → 「⚠️ 利幅不足：エントリー見送り推奨」と明示すること
+・上記どちらかに該当する場合、シナリオAはエントリー禁止として扱う
+
+━━━ 【出力フォーマット（必ず守ること）】 ━━━
+
+■ 今日の方針
+（トレンド方向と今日のスタンスを1〜2文で。順張り方向を明確に）
+
+■ トレンド根拠
+（日足・4H・1Hのダウ理論判断。高値安値の実態を具体的に）
+
+■ エントリーシナリオ A【最優先の待ち場所】
+方向：（買い or 売り）
+待つ場所：（何pips先の何というライン）
+1時間足で確認すること：
+5分足で確認するパターン：
+エントリー価格帯：（具体的な数値）
+---
+SL（損切り）：（具体的な数値）　損切り幅：約●pips
+TP①（利確1）：（具体的な数値・次の水平線）　利幅：約●pips　RR：1:●
+TP②（利確2）：（具体的な数値・その次の水平線）　利幅：約●pips　RR：1:●
+---
+根拠：（ルールのどの条件を満たすか、RRが成立する理由）
+
+■ エントリーシナリオ B【第2候補】
+（Aが来ない or 逃した場合の次の待ち場所。Aと同じフォーマット）
+
+■ 今日のNGゾーン
+（絶対に手を出さない具体的な価格帯と理由）
+
+■ 壁への対応
+（壁が近い場合：ブレイク後のサポレジ転換狙いの具体的な手順。遠ければ「問題なし」と記載）
+
+■ コーチからの一言
+（今日の相場で最も注意すべき点を1文で）
+
+具体的な価格を必ず含め、日本語でトレーダー目線で簡潔に書いてください。`;
+}
+
+// ── 単ペア分析 ────────────────────────────
+async function analyzeSinglePair(apiKey, pairStr) {
+  const steps = [
+    `${pairStr} 日足取得中...`,
+    `${pairStr} 4時間足取得中...`,
+    `${pairStr} 1時間足取得中...`,
+    'トレンド判定・水平線検出中...',
+    'AIがエントリーポイントを生成中...',
+  ];
+  showLoading(steps);
+
+  stepActive(0);
+  const cD  = await fetchCandles(apiKey, pairStr, 'D',   30);
+  stepDone(0);
+
+  stepActive(1);
+  const c4h = await fetchCandles(apiKey, pairStr, '240', 60);
+  stepDone(1);
+
+  stepActive(2);
+  const c1h = await fetchCandles(apiKey, pairStr, '60',  80);
+  stepDone(2);
+
+  stepActive(3);
+  const tD    = detectTrend(cD);
+  const t4h   = detectTrend(c4h);
+  const t1h   = detectTrend(c1h);
+  const price = c1h[0].close;
+  const lines = findLines(c1h, price, pairStr);
+  const walls = findWalls(cD, price, pairStr);
+  updateSidebar(tD, t4h, t1h, price, lines, walls, pairStr);
+  await sleep(200);
+  stepDone(3);
+
+  stepActive(4);
+  const recentH1 = c1h.slice(0, 12).map(c =>
+    `  ${c.datetime}  O:${c.open} H:${c.high} L:${c.low} C:${c.close}`
+  ).join('\n');
+
+  const prompt = buildPrompt(pairStr, price, tD, t4h, t1h, lines, walls, document.getElementById('notes').value, recentH1);
+  const aiRes  = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key': ANTHROPIC_KEY,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true',
+    },
+    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1000, messages:[{role:'user',content:prompt}] })
+  });
+  const aiData = await aiRes.json();
+  const aiText = aiData.content?.map(b=>b.text||'').join('') || 'AI応答エラー';
+  stepDone(4);
+  await sleep(150);
+  document.getElementById('ldCard')?.remove();
+
+  renderResult(pairStr, price, tD, t4h, t1h, lines, walls, aiText);
+}
+
+// ── 全ペア比較分析 ────────────────────────
+async function analyzeAllPairs(apiKey) {
+  const steps = [
+    'USD/JPY データ取得中...',
+    'EUR/USD データ取得中...',
+    'AUD/USD データ取得中...',
+    'AUD/JPY データ取得中...',
+    'BTC/USD データ取得中...',
+    '全ペア評価・最適ペア選定中...',
+    'AIが最優先ペアの戦略を生成中...',
+  ];
+  showLoading(steps);
+  const rateNote = document.createElement('div');
+  rateNote.id = 'rateNote';
+  rateNote.style.cssText = 'font-size:11px;color:var(--muted);padding:8px 12px;background:var(--s2);border-radius:6px;border:1px solid var(--border);margin-top:8px';
+  rateNote.textContent = '⏳ 全5ペア取得中。15リクエスト必要なため約2分かかります。そのままお待ちください。';
+  document.getElementById('mainPanel').appendChild(rateNote);
+
+  const results = [];
+  let requestCount = 0;
+
+  const rateLimitedFetch = async (apiKey, p, resolution, size) => {
+    // 7リクエストごとに65秒待機（8未満に抑えてバッファを持たせる）
+    if (requestCount > 0 && requestCount % 7 === 0) {
+      const waitEl = document.getElementById('rateNote');
+      if (waitEl) waitEl.textContent = `⏳ レート制限のため65秒待機中...（${requestCount}リクエスト完了）`;
+      await sleep(65000);
+      if (waitEl) waitEl.textContent = '⏳ 再開します...';
+    }
+    requestCount++;
+    return await fetchCandles(apiKey, p, resolution, size);
+  };
+
+  for (let i = 0; i < PAIRS.length; i++) {
+    const p = PAIRS[i];
+    stepActive(i);
+    try {
+      const cD  = await rateLimitedFetch(apiKey, p, 'D',   30);
+      const c4h = await rateLimitedFetch(apiKey, p, '240', 60);
+      const c1h = await rateLimitedFetch(apiKey, p, '60',  80);
+      const tD    = detectTrend(cD);
+      const t4h   = detectTrend(c4h);
+      const t1h   = detectTrend(c1h);
+      const price = c1h[0].close;
+      const lines = findLines(c1h, price, p);
+      const walls = findWalls(cD, price, p);
+      const sc    = calcScore(tD, t4h, t1h, price, lines, walls, p);
+      results.push({ pair: p, tD, t4h, t1h, price, lines, walls, cD, c4h, c1h, sc });
+    } catch(e) {
+      results.push({ pair: p, error: e.message, sc: { score: -99, label: 'エラー', msgs: [e.message] } });
+    }
+    stepDone(i);
+    await sleep(500);
+  }
+
+  // スコア順ソート
+  results.sort((a, b) => b.sc.score - a.sc.score);
+  const best = results.find(r => !r.error);
+
+  // スコア表示
+  stepActive(4);
+  renderScoreList(results);
+  await sleep(300);
+  stepDone(4);
+
+  if (!best) throw new Error('全ペアでデータ取得に失敗しました');
+
+  // ベストペアのサイドバー更新
+  updateSidebar(best.tD, best.t4h, best.t1h, best.price, best.lines, best.walls, best.pair);
+
+  // AI分析（ベストペア）
+  stepActive(5);
+  const recentH1 = best.c1h.slice(0, 12).map(c =>
+    `  ${c.datetime}  O:${c.open} H:${c.high} L:${c.low} C:${c.close}`
+  ).join('\n');
+
+  // 全ペアのサマリーをAIに渡す
+  const allSummary = results.map(r => r.error
+    ? `${r.pair}: データエラー`
+    : `${r.pair}: 日足${tLabel[r.tD]} / 4H${tLabel[r.t4h]} / 現在値${fmt(r.price, r.pair)} / 適性[${r.sc.label}/${r.sc.score}点]`
+  ).join('\n');
+
+  const prompt = buildPrompt(best.pair, best.price, best.tD, best.t4h, best.t1h, best.lines, best.walls, document.getElementById('notes').value, recentH1)
+    + `\n\n━━━ 【全ペア比較サマリー】 ━━━\n${allSummary}\n\n上記の中で今日エントリーするなら ${best.pair} が最も条件が揃っています。その理由も冒頭に1文で追記してください。`;
+
+  const aiRes  = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key': ANTHROPIC_KEY,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true',
+    },
+    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1000, messages:[{role:'user',content:prompt}] })
+  });
+  const aiData = await aiRes.json();
+  const aiText = aiData.content?.map(b=>b.text||'').join('') || 'AI応答エラー';
+  stepDone(5);
+  await sleep(150);
+  document.getElementById('rateNote')?.remove();
+  document.getElementById('ldCard')?.remove();
+
+  // ベスト以外のペアも簡易表示
+  for (const r of results) {
+    if (r === best || r.error) continue;
+    renderMiniResult(r);
+  }
+  renderResult(best.pair, best.price, best.tD, best.t4h, best.t1h, best.lines, best.walls, aiText, true);
+}
+
+// ── スコアリスト表示 ──────────────────────
+function renderScoreList(results) {
+  const sec = document.getElementById('scoreSection');
+  const list = document.getElementById('scoreList');
+  sec.style.display = '';
+  list.innerHTML = '';
+  results.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'score-row' + (i === 0 && !r.error ? ' best' : '');
+    const badgeCls = r.error ? 'sc-ng'
+      : r.sc.score >= 5 ? 'sc-ready'
+      : r.sc.score >= 3 ? 'sc-partial'
+      : r.sc.score >= 1 ? 'sc-wait' : 'sc-ng';
+    row.innerHTML = `
+      <span class="score-pair">${i===0&&!r.error?'★ ':''} ${r.pair}</span>
+      <span class="score-badge ${badgeCls}">${r.error ? 'エラー' : r.sc.label}</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// ── SL/TP パネル構築 ─────────────────────
+function buildSlTpPanel(aiText, t4h, pairStr='') {
+  const slMatch  = aiText.match(/SL[（(]損切り[）)][:：]\s*([\d.]+)/);
+  const tp1Match = aiText.match(/TP①[（(]利確1?[）)][:：]\s*([\d.]+)/);
+  const tp2Match = aiText.match(/TP②[（(]利確2?[）)][:：]\s*([\d.]+)/);
+  const sl  = slMatch  ? slMatch[1]  : null;
+  const tp1 = tp1Match ? tp1Match[1] : null;
+  const tp2 = tp2Match ? tp2Match[1] : null;
+
+  const rrMatches = [...aiText.matchAll(/RR[:：]\s*1[:：]([\d.]+)/g)];
+  const rr1 = rrMatches[0] ? parseFloat(rrMatches[0][1]) : null;
+  const rr2 = rrMatches[1] ? parseFloat(rrMatches[1][1]) : null;
+
+  // RR不足・利幅不足の警告をAIテキストから検出
+  const hasRrWarn   = aiText.includes('RR不足') || aiText.includes('RR：不足');
+  const hasPipWarn  = aiText.includes('利幅不足');
+  const isSkip      = hasRrWarn || hasPipWarn || (rr1 !== null && rr1 < 1.5);
+
+  if (!sl && !tp1) return '';
+
+  const dir = t4h === 'up' ? 'long' : 'short';
+  const slColor  = 'var(--short)';
+  const tp1Color = dir === 'long' ? 'var(--long)' : 'var(--short)';
+  const tp2Color = 'var(--blue)';
+
+  // RRバッジの色
+  const rrBadge = (rr) => {
+    if (!rr) return '';
+    const cls = rr >= 2.0 ? 'rr-great' : rr >= 1.5 ? 'rr-ok' : 'rr-ng';
+    return `<span class="sltp-rr ${cls}">RR 1:${rr}</span>`;
+  };
+
+  const row = (icon, label, val, color, rr) => val ? `
+    <div class="sltp-row">
+      <span class="sltp-icon" style="color:${color}">${icon}</span>
+      <span class="sltp-label">${label}</span>
+      <span class="sltp-val" style="color:${color}">${val}</span>
+      ${rr !== null ? rrBadge(rr) : '<span></span>'}
+    </div>` : '';
+
+  const skipBanner = isSkip ? `
+    <div class="sltp-skip">
+      ⚠️ ${rr1 !== null && rr1 < 1.5 ? `RR ${rr1}（基準1:1.5未満）` : ''}${hasPipWarn ? '利幅30pips未満' : ''} — エントリー見送り推奨
+    </div>` : '';
+
+  return `
+    <div class="sltp-panel${isSkip ? ' sltp-ng' : ''}">
+      <div class="sltp-title">
+        📌 シナリオ A — 損切り・利確ライン
+        ${isSkip ? '<span style="color:var(--short);margin-left:8px">⚠️ 見送り推奨</span>' : rr1 >= 1.5 ? '<span style="color:var(--long);margin-left:8px">✓ RR基準クリア</span>' : ''}
+      </div>
+      ${skipBanner}
+      ${row('✕', isBtc(pairStr) ? 'SL（損切り・$200以上推奨）' : 'SL（損切り・40pips以上）', sl, slColor, null)}
+      ${row('①', isBtc(pairStr) ? 'TP①（半決済）' : 'TP①（半決済・30〜50pips目標）', tp1, tp1Color, rr1)}
+      ${row('②', 'TP②（残り決済）', tp2, tp2Color, rr2)}
+    </div>`;
+}
+
+// ── メイン結果レンダリング ─────────────────
+function renderResult(pairStr, price, tD, t4h, t1h, lines, walls, aiText, isBest=false) {
+  const panel = document.getElementById('mainPanel');
+  const dirClass = t4h==='up'?'long':t4h==='down'?'short':'wait';
+  const dirLabel = t4h==='up'?'買いシナリオ':t4h==='down'?'売りシナリオ':'様子見';
+  const timeStr = new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+  const closestWall = walls.length ? Math.min(...walls.map(w=>w.dist)) : 999;
+  const wallNGThreshold = isBtc(pairStr) ? 500 : 20;
+  const wallUnit = isBtc(pairStr) ? '$' : 'pips';
+  const ngWall = closestWall <= wallNGThreshold
+    ? `<div class="ng-bar">🚨 日足の大物の壁まで${wallUnit}${closestWall} — エントリー禁止。ブレイク後のサポレジ転換のみ待機</div>`
+    : '';
+  const formatted = aiText.replace(/■\s*/g, '<span class="sec">■ </span>');
+  const bestBadge = isBest ? '<span class="pill" style="background:rgba(52,201,106,.2);color:var(--long)">★ 最優先ペア</span>' : '';
+  const slTpPanel = buildSlTpPanel(aiText, t4h, pairStr);
+
+  const card = document.createElement('div');
+  card.className = 'result-card';
+  card.innerHTML = `
+    <div class="res-head">
+      ${bestBadge}
+      <span class="pill pill-${dirClass}">${dirLabel}</span>
+      <span class="res-pair">${pairStr} · ${fmt(price, pairStr)}</span>
+      <span class="res-time">${timeStr}</span>
+    </div>
+    <div class="data-row">
+      <div class="dc"><div class="dc-l">日足</div><div class="dc-v ${tValClass[tD]}">${tLabel[tD]}</div></div>
+      <div class="dc"><div class="dc-l">4時間足</div><div class="dc-v ${tValClass[t4h]}">${tLabel[t4h]}</div></div>
+      <div class="dc"><div class="dc-l">1時間足</div><div class="dc-v ${tValClass[t1h]}">${tLabel[t1h]}</div></div>
+      <div class="dc"><div class="dc-l">R1</div><div class="dc-v c-short">${lines.r1?fmt(lines.r1.price,pairStr):'--'}</div></div>
+      <div class="dc"><div class="dc-l">S1</div><div class="dc-v c-long">${lines.s1?fmt(lines.s1.price,pairStr):'--'}</div></div>
+      <div class="dc"><div class="dc-l">日足の壁</div><div class="dc-v c-purple">${walls.length?fmt(walls[0].price,pairStr):'なし'}</div></div>
+    </div>
+    ${ngWall}
+    ${slTpPanel}
+    <div class="ai-body">${formatted}</div>
+  `;
+  panel.insertBefore(card, panel.firstChild);
+}
+
+// ── 簡易サマリー（全ペア比較時の非ベストペア） ──
+function renderMiniResult(r) {
+  const panel = document.getElementById('mainPanel');
+  const dirClass = r.t4h==='up'?'long':r.t4h==='down'?'short':'wait';
+  const sc = r.sc;
+  const badgeCls = sc.score >= 5 ? 'sc-ready' : sc.score >= 3 ? 'sc-partial' : 'sc-wait';
+  const div = document.createElement('div');
+  div.className = 'result-card';
+  div.innerHTML = `
+    <div class="res-head">
+      <span class="pill pill-${dirClass}">${r.t4h==='up'?'買い':r.t4h==='down'?'売り':'様子見'}</span>
+      <span class="res-pair">${r.pair} · ${fmt(r.price, r.pair)}</span>
+      <span class="score-badge ${badgeCls}" style="margin-left:8px">${sc.label}</span>
+      <span class="res-time">参考</span>
+    </div>
+    <div class="data-row">
+      <div class="dc"><div class="dc-l">日足</div><div class="dc-v ${tValClass[r.tD]}">${tLabel[r.tD]}</div></div>
+      <div class="dc"><div class="dc-l">4時間足</div><div class="dc-v ${tValClass[r.t4h]}">${tLabel[r.t4h]}</div></div>
+      <div class="dc"><div class="dc-l">壁まで</div><div class="dc-v">${r.walls.length ? (isBtc(r.pair) ? '$'+Math.min(...r.walls.map(w=>w.dist)) : Math.min(...r.walls.map(w=>w.dist))+'pips') : '遠い'}</div></div>
+    </div>
+    <div class="ai-body" style="font-size:12px;color:var(--muted)">${sc.msgs.join('　')}</div>
+  `;
+  document.getElementById('mainPanel').insertBefore(div, document.getElementById('mainPanel').firstChild);
+}
+
+// ── エントリーポイント ─────────────────────
+let ANTHROPIC_KEY = '';
+
+function setUILocked(locked) {
+  document.getElementById('runBtn').disabled = locked;
+  document.querySelectorAll('.ptab').forEach(b => b.disabled = locked);
+}
+
+async function runAll() {
+  const apiKey  = document.getElementById('apiKey').value.trim();
+  const anthKey = document.getElementById('anthropicKey').value.trim();
+  if (!apiKey)  { alert('Twelve Data APIキーを入力してください'); return; }
+  if (!anthKey) { alert('Anthropic APIキーを入力してください（sk-ant-...）'); return; }
+  ANTHROPIC_KEY = anthKey;
+
+  setUILocked(true);
+  document.getElementById('scoreSection').style.display = 'none';
+  document.getElementById('linesList').innerHTML = '<div style="color:var(--dim);font-size:11px;text-align:center;padding:12px">取得中...</div>';
+  document.querySelectorAll('.result-card').forEach(c => c.remove());
+  document.getElementById('emptyState')?.remove();
+  document.getElementById('rateNote')?.remove();
+
+  try {
+    if (currentPair === 'ALL') {
+      await analyzeAllPairs(apiKey);
+    } else {
+      await analyzeSinglePair(apiKey, currentPair);
+    }
+  } catch(e) {
+    document.getElementById('ldCard')?.remove();
+    document.getElementById('rateNote')?.remove();
+    const err = document.createElement('div');
+    err.className = 'result-card';
+    err.innerHTML = `<div class="res-head"><span class="pill pill-ng">エラー</span></div>
+      <div class="ai-body" style="color:var(--short)">⚠️ ${e.message}\n\n・APIキーを確認してください\n・土日祝は市場が閉まりデータが取得できません\n・無料プランは1分あたり8リクエストまでです</div>`;
+    document.getElementById('mainPanel').insertBefore(err, document.getElementById('mainPanel').firstChild);
+  } finally {
+    setUILocked(false);
+  }
+}
+</script>
+</body>
+</html>
